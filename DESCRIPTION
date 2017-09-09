@@ -1,0 +1,19 @@
+Package: dlearn
+Type: Package
+Title: Learn Data
+Version: 0.1.0
+Author@R: person("Jason", "Gregory", email = "jason.s.gregory@gmail.com", rol = c("aut", "cre"))
+Maintainer@R: person("Jason", "Gregory", email = "jason.s.gregory@gmail.com", rol = c("aut", "cre"))
+Description: Quickly learn and model data.
+License: What license is it under?
+Encoding: UTF-8
+LazyData: true
+Depends:
+  R (>= 3.1.0),
+  dplyr (>= 0.7.0)
+Imports:
+  tibble (>= 1.3.1),
+  purrr,
+  data.table (>= 1.10.4),
+  tidyr (>= 0.6.3)
+RoxygenNote: 6.0.1
