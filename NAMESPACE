@@ -2,3 +2,5 @@
 
 export(lselect)
 export(summarize_data)
+
+import(data.table)
