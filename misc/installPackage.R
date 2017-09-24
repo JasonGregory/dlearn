@@ -7,4 +7,5 @@ devtools::document()
 #devtools::install("//Co.ihc.com/sh/User/jgregor1/GitHub/dataFun")
 
 #install package from Github
-install_github("JasonGregory/dataFun")
+devtools::install_github("JasonGregory/dlearn")
+
