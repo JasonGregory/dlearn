@@ -4,7 +4,7 @@
 \alias{lselect}
 \title{Returns a list subset.}
 \usage{
-lselect(data, column, list_name = FALSE)
+lselect(data, column, var_names = NULL, list_name = FALSE)
 }
 \arguments{
 \item{data}{Data frame that you want to explore.}

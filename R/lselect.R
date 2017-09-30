@@ -6,7 +6,7 @@
 #' @return A subset of a list.
 #' @export
 
-lselect <- function(data, column, list_name = FALSE) {
+lselect <- function(data, column, var_names = NULL, list_name = FALSE) {
   column <- enquo(column)
   col <- data %>% select(!!column)
   col_class <- class(col[[1]][1])
