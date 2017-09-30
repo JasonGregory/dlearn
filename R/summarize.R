@@ -111,13 +111,13 @@ summarize_data <- function(data, type = "basic") {
 
 #' Summary of variable imporance.
 #'
-#' @param data Data frame that you want to explore.
+#' @param data Data frame that you want to explore. Processes about 378,000 data cells per second.
 #' @param var_outcome Outcome variable.
 #' @param objective Either "reg:linear" or "reg:logistic".
 #' @return A data frame
 #' @export
 
-summarize_importance <- function(data, var_outcome, objective = "reg:linear") {
+summarize_importance <- function(data, var_outcome = "none", objective = "reg:linear") {
   # Preparing importance data
   treatment <- vtreat::designTreatmentsZ(data, colnames(data), verbose = FALSE)
   treated <- as_tibble(vtreat::prepare(treatment, data)) %>%
@@ -131,9 +131,16 @@ summarize_importance <- function(data, var_outcome, objective = "reg:linear") {
     select(-var_count) %>%
     filter(row_number() == 1) %>%
     ungroup
-  var_outcome <- importance %>% filter(origName == var_outcome) %>% lselect(variable)
-  treated <- select(treated, one_of(importance$variable)) %>%
-    select(var_outcome, everything())
+  var_outcome <- if (var_outcome != "none") {
+    importance %>% filter(origName == var_outcome) %>% lselect(variable)
+    } else {var_outcome}
+
+  if (var_outcome != "none") {
+    treated <- select(treated, one_of(importance$variable)) %>%
+      select(var_outcome, everything())
+  } else {
+    treated <- select(treated, one_of(importance$variable))
+  }
 
   # correlation matrix ---------------------------
 
@@ -143,9 +150,11 @@ summarize_importance <- function(data, var_outcome, objective = "reg:linear") {
     left_join(select(importance, origName, variable), "variable") %>%
     arrange(vars, desc(abs(correlation)))
 
-  corr_outcome <- corr_importance %>%
-    filter(vars == var_outcome) %>%
-    select(-vars, -origName)
+  if (var_outcome != "none") {
+    corr_outcome <- corr_importance %>%
+      filter(vars == var_outcome) %>%
+      select(-vars, -origName)
+  }
 
   corr_importance <- corr_importance %>%
     filter(variable != vars) %>%
@@ -156,45 +165,52 @@ summarize_importance <- function(data, var_outcome, objective = "reg:linear") {
 
   # variable importance --------------------------
 
-  trainIndex <- caret::createDataPartition(lselect(treated, var_outcome),
-                                           p = .75,
-                                           list = FALSE,
-                                           times = 1)
+  if (var_outcome != "none") {
+    trainIndex <- caret::createDataPartition(lselect(treated, var_outcome),
+                                             p = .75,
+                                             list = FALSE,
+                                             times = 1)
+    dataTrain <- treated[trainIndex,]
+    dataTest <- treated[-trainIndex,]
 
-  dataTrain <- treated[trainIndex,]
-  dataTest <- treated[-trainIndex,]
+    dTrain <- xgboost::xgb.DMatrix(data = as.matrix(dataTrain[,-1]), label = lselect(dataTrain, var_outcome))
+    dTest <- xgboost::xgb.DMatrix(data = as.matrix(dataTest[,-1]), label = lselect(dataTest, var_outcome))
 
-  dTrain <- xgboost::xgb.DMatrix(data = as.matrix(dataTrain[,-1]), label = lselect(dataTrain, var_outcome))
-  dTest <- xgboost::xgb.DMatrix(data = as.matrix(dataTest[,-1]), label = lselect(dataTest, var_outcome))
+    # Boosted Model (will need a paramater to adjust for the objective function)
+    watchlist <- list(train=dTrain, test=dTest)
+    bst <- xgboost::xgb.train(data=dTrain, nround=200, watchlist=watchlist, objective = objective,
+                              early_stopping_rounds = 5, verbose = FALSE, eta = .3)
 
-  # Boosted Model (will need a paramater to adjust for the objective function)
-  watchlist <- list(train=dTrain, test=dTest)
-  bst <- xgboost::xgb.train(data=dTrain, nround=200, watchlist=watchlist, objective = objective,
-                            early_stopping_rounds = 5, verbose = FALSE, eta = .3)
+    bst_importance <- as_tibble(xgboost::xgb.importance(colnames(dataTrain[,-1]), model = bst))
+    bst_importance <- bst_importance %>%
+      mutate(bst_rank = row_number(desc(Gain))) %>%
+      rename(variable = Feature, bst_gain = Gain) %>%
+      select(variable, bst_gain, bst_rank)
 
-  bst_importance <- as_tibble(xgboost::xgb.importance(colnames(dataTrain[,-1]), model = bst))
-  bst_importance <- bst_importance %>%
-    mutate(bst_rank = row_number(desc(Gain))) %>%
-    rename(variable = Feature, bst_gain = Gain) %>%
-    select(variable, bst_gain, bst_rank)
-
-  importance <- importance %>%
-    left_join(bst_importance, "variable") %>%
-    mutate(bst_gain = if_else(is.na(bst_gain), 0, bst_gain),
-           bst_rank = if_else(is.na(bst_rank), max(bst_importance$bst_rank), bst_rank),
-           bst_rank = if_else(variable == var_outcome, nrow(importance), bst_rank)
-    ) %>%
-    left_join(corr_outcome, "variable") %>%
-    left_join(corr_importance, c("variable" = "vars")) %>%
-    select(-variable, -code) %>%
-    rename(variable = origName) %>%
-    arrange(bst_rank)
+    importance <- importance %>%
+      left_join(bst_importance, "variable") %>%
+      mutate(bst_gain = if_else(is.na(bst_gain), 0, bst_gain),
+             bst_rank = if_else(is.na(bst_rank), max(bst_importance$bst_rank), bst_rank),
+             bst_rank = if_else(variable == var_outcome, nrow(importance), bst_rank)
+      ) %>%
+      left_join(corr_outcome, "variable") %>%
+      left_join(corr_importance, c("variable" = "vars")) %>%
+      select(-variable, -code) %>%
+      rename(variable = origName) %>%
+      arrange(bst_rank)
+  } else {
+    importance <- importance %>%
+      left_join(corr_importance, c("variable" = "vars")) %>%
+      select(-variable, -code) %>%
+      rename(variable = origName)
+  }
 
   names(importance$corr_tbl) <- importance$variable
 
   top <- lselect(importance, corr_tbl) %>%
     group_by(name) %>%
-    mutate(rank = min_rank(desc(abs(correlation)))) %>%
+    mutate(rank = min_rank(desc(abs(correlation))),
+           corr50_count = length(correlation[abs(correlation) >= .5])) %>%
     filter(rank == 1 | rank == 2) %>%
     group_by(name, rank) %>%
     mutate(top_count = n()) %>%
@@ -202,17 +218,25 @@ summarize_importance <- function(data, var_outcome, objective = "reg:linear") {
     ungroup() %>%
     mutate(variable = paste(variable, "(", round(correlation,2), ")", sep = "")) %>%
     mutate(top_value = if_else(top_count == 1, variable, "multiple")) %>%
-    select(name, rank, top_value) %>%
+    select(name, rank, top_value, corr50_count) %>%
     distinct() %>%
     tidyr::spread(rank, top_value) %>%
     rename(corr_1 = `1`, corr_2 = `2`) %>%
     mutate(corr_2 = if_else((corr_1 %in% c("multiple","distinct") & is.na(corr_2)), corr_1, corr_2))
 
-  importance <- importance %>%
-    left_join(top, c("variable" = "name")) %>%
-    mutate(r2_outcome = correlation^2) %>%
-    select(variable, bst_gain, bst_rank, correlation, r2_outcome, corr_1, corr_2, corr_tbl) %>%
-    rename(corr_outcome = correlation)
+  if (var_outcome != "none") {
+    importance <- importance %>%
+      left_join(top, c("variable" = "name")) %>%
+      mutate(r2_outcome = correlation^2) %>%
+      select(variable, bst_gain, bst_rank, r2_outcome, corr50_count, corr_1, corr_2, corr_tbl)
+  } else {
+    importance <- importance %>%
+      left_join(top, c("variable" = "name")) %>%
+      select(variable, corr50_count, corr_1, corr_2, corr_tbl) %>%
+      arrange(desc(corr50_count))
+  }
+
+  names(importance$corr_tbl) <- importance$variable
 
   return(importance)
 }

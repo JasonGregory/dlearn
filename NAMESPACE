@@ -5,3 +5,4 @@ export(summarize_data)
 export(summarize_importance)
 
 import(data.table)
+
